@@ -739,7 +739,7 @@ body{background-color:var(--bg);background-image:url("eskul-assets/background.pn
    ===================================================================== */
 
 /* ---------- 1. Konstanta ---------- */
-const APP_VERSION='3.4.0';
+const APP_VERSION='3.5.0';
 const LS_DATA='eskul-mgmt:data:v3', LS_UI='eskul-mgmt:ui:v1', LS_CLOUD='eskul-mgmt:cloud:v1', LS_QUEUE='eskul-mgmt:queue:v1';
 const SUPABASE_CDN='https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js';
 
@@ -1628,7 +1628,7 @@ function friendlyAuthError(msg){msg=String(msg||'');
   if(/email not confirmed/i.test(msg))return 'Akun belum dikonfirmasi. Superuser perlu mematikan “Confirm email” di Supabase atau mengonfirmasi akun ini.';
   if(/rate limit|security purposes|429|too many/i.test(msg))return 'Server membatasi permintaan sementara. Tunggu beberapa menit lalu coba lagi.';
   if(/signups? not allowed|signup.*disabled/i.test(msg))return 'Pendaftaran akun dimatikan di Supabase. Aktifkan “Allow new users to sign up” (lihat README).';
-  if(/unable to validate email|invalid.*email|email.*invalid/i.test(msg))return 'Format username/email tidak diterima server. Periksa CONFIG.loginDomain di index.html.';
+  if(/unable to validate email|invalid.*email|email.*invalid/i.test(msg))return 'Supabase menolak alamat email ini (domainnya tidak punya server email). Jalankan supabase-tambahan-buat-akun.sql di SQL Editor agar akun dibuat langsung dari database.';
   if(/password.*(weak|short|characters)|(weak|short).*password/i.test(msg))return 'Kata sandi terlalu lemah menurut pengaturan Supabase.';
   if(/failed to fetch|networkerror|gagal memuat|load failed|network/i.test(msg))return IS_FRAMED?'Pratinjau di Claude tidak dapat menghubungi Supabase. Buka versi yang di-hosting, atau coba mode demo.':'Tidak dapat terhubung ke server. Periksa koneksi internet.';
   return msg}
@@ -3631,9 +3631,16 @@ async function createAccount({nama,login,password,role:r,studentId,eskuls=[]}){
     if(studentId&&list.some(x=>x.student_id===studentId))throw new Error('Siswa ini sudah punya akun.');
     list.push({id:newId('USR'),nama,username:login,email,role:r,student_id:studentId||null,active:true,eskul_ids:eskuls});lsSet(LS_DEMO_USERS,list);return}
   if((UI.users||[]).some(x=>x.student_id&&x.student_id===studentId))throw new Error('Siswa ini sudah punya akun.');
+  if((UI.users||[]).some(x=>String(x.email||'').toLowerCase()===email))throw new Error('Akun dengan username/email ini sudah ada di daftar.');
+  let uid=null,existed=false;
+  // Jalur utama: superuser membuat akun langsung lewat fungsi database (tanpa pendaftaran publik/email).
+  const rc=await Sync.client.rpc('admin_create_user',{p_email:email,p_password:password,p_nama:nama});
+  if(!rc.error&&rc.data){uid=rc.data;
+    const {data:ex}=await Sync.client.from('profiles').select('id').eq('id',uid).maybeSingle();if(ex)throw new Error('Akun dengan username/email ini sudah ada di daftar.')}
+  else if(rc.error&&!/admin_create_user|PGRST202|could not find the function/i.test(rc.error.message+' '+(rc.error.code||'')))throw new Error(rc.error.message);
+  if(!uid){ // cadangan bila fungsi admin_create_user belum dipasang: lewat pendaftaran biasa
   const c=Sync.cfg();
   const tmp=window.supabase.createClient(c.url,c.key,{auth:{persistSession:false,autoRefreshToken:false,detectSessionInUrl:false,storageKey:'eskul-mgmt-signup'}});
-  let uid=null,existed=false;
   const {data,error}=await tmp.auth.signUp({email,password,options:{data:{nama}}});
   if(error){if(/registered|already exists/i.test(error.message))existed=true;else throw error}
   else{uid=data.user?.id||null;
@@ -3644,6 +3651,7 @@ async function createAccount({nama,login,password,role:r,studentId,eskuls=[]}){
     if(!uid)throw new Error('Email sudah terdaftar tetapi akunnya tidak ditemukan.');
     const {data:ex}=await Sync.client.from('profiles').select('id').eq('id',uid).maybeSingle();if(ex)throw new Error('Akun dengan username/email ini sudah ada di daftar.');
     const p=await Sync.client.rpc('guru_set_password',{target:uid,new_password:password});if(p.error)throw new Error(p.error.message)}
+  }
   if(!uid)throw new Error('Akun tidak berhasil dibuat.');
   const {error:e2}=await Sync.client.from('profiles').insert({id:uid,email,username:login,nama,role:r,student_id:studentId||null,active:true,eskul_ids:eskuls});
   if(e2)throw new Error(/profiles_student_uq/.test(e2.message)?'Siswa ini sudah punya akun.':e2.message);
