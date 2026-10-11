@@ -403,6 +403,16 @@ table.tbl{width:100%;border-collapse:collapse;font-size:13px}
 @keyframes fade{from{opacity:0}}
 .modal{background:var(--surface);border-radius:16px;box-shadow:var(--shadow-lg);width:100%;max-width:560px;max-height:calc(100dvh - 40px);display:flex;flex-direction:column;border:1px solid var(--line)}
 .modal.lg{max-width:820px}.modal.sm{max-width:420px}
+.imp-steps{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
+.imp-steps>div{display:flex;gap:10px;align-items:flex-start;padding:10px 12px;border:1px solid var(--line);border-radius:12px;background:var(--surface-2);font-size:12.5px;line-height:1.45}
+.imp-steps>div>b{flex:none;width:22px;height:22px;border-radius:50%;display:grid;place-items:center;background:var(--primary);color:#fff;font-size:12px}
+.imp-sum{display:flex;flex-wrap:wrap;gap:8px;margin:2px 0 8px}
+.imp-sum span{padding:5px 10px;border-radius:999px;background:var(--surface-3);font-size:12.5px}
+.imp-sum .ok{background:var(--ok-soft);color:var(--ok)}.imp-sum .info{background:var(--info-soft);color:var(--info)}.imp-sum .bad{background:var(--bad-soft);color:var(--bad)}.imp-sum .warn{background:var(--warn-soft);color:var(--warn)}
+.imp-tbl{max-height:46vh;overflow:auto;border:1px solid var(--line);border-radius:12px}
+.imp-tbl thead th{position:sticky;top:0;z-index:1}
+.imp-tbl tr.imp-err td{background:var(--bad-soft)}
+@media (max-width:760px){.imp-steps{grid-template-columns:minmax(0,1fr)}}
 .modal-h{display:flex;align-items:center;justify-content:space-between;padding:18px 20px;border-bottom:1px solid var(--line)}
 .modal-h h3{font-size:16px;font-weight:700}
 .modal-b{padding:20px;overflow-y:auto;display:flex;flex-direction:column;gap:14px}
@@ -729,7 +739,7 @@ body{background-color:var(--bg);background-image:url("eskul-assets/background.pn
    ===================================================================== */
 
 /* ---------- 1. Konstanta ---------- */
-const APP_VERSION='3.3.0';
+const APP_VERSION='3.4.0';
 const LS_DATA='eskul-mgmt:data:v3', LS_UI='eskul-mgmt:ui:v1', LS_CLOUD='eskul-mgmt:cloud:v1', LS_QUEUE='eskul-mgmt:queue:v1';
 const SUPABASE_CDN='https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js';
 
@@ -1232,7 +1242,7 @@ const STAFF_ROLES=['guru','koordinator','pelatih'];            // wajib punya da
 function canRoute(r){const d=roleDef();return d.routes==='*'?r!=='progres'&&!(d.deny||[]).includes(r):d.routes.includes(r)}
 function canWrite(k){const d=roleDef();return d.write==='*'||d.write.includes(k)}
 /* Tombol khusus superuser & guru pembimbing; dihapus otomatis dari tampilan peran lain */
-const GURU_ACTS=['addSch','editSch','delSch','addAct','editAct','delAct','addAnn','editAnn','pinAnn','delAnn','addPlayer','editPlayer','addTr','editTr','addMatch','editMatch','addGoal','delEvent','addSub','delSub','saveNotes','addStudent','editStudent','archiveStudent','restoreStudent','exportJSON','luAuto','luClear','luSave','luPick','luBench'];
+const GURU_ACTS=['importStudents','addSch','editSch','delSch','addAct','editAct','delAct','addAnn','editAnn','pinAnn','delAnn','addPlayer','editPlayer','addTr','editTr','addMatch','editMatch','addGoal','delEvent','addSub','delSub','saveNotes','addStudent','editStudent','archiveStudent','restoreStudent','exportJSON','luAuto','luClear','luSave','luPick','luBench'];
 function applyPerms(root){
   if(!root||isSuper())return;
   if(!isGuru())$$('[data-act]',root).forEach(el=>{if(GURU_ACTS.includes(el.dataset.act))el.remove()});
@@ -1338,6 +1348,12 @@ const Sync={
       S=next;persist();this.set(this.q.length?'syncing':'synced');render();
     }catch(e){this.set(navigator.onLine?'error':'offline',e.message)}
   },
+  /* Kirim banyak baris sekaligus (impor). Gagal/offline → masuk antrean biasa. */
+  async pushMany(key,ids,forceQueue){ids=[...new Set(ids)];if(App.mode!=='cloud'||!ids.length)return true;
+    if(!forceQueue&&this.client&&this.user&&navigator.onLine){try{this.set('syncing');const arr=COLS[key].get(S);const rows=ids.map(id=>arr.find(r=>r.id===id)).filter(Boolean).map(r=>this.toRow(key,r));
+      for(let i=0;i<rows.length;i+=200){const {error}=await this.client.from(COLS[key].table).upsert(rows.slice(i,i+200));if(error)throw error}
+      if(!this.q.length)this.set('synced');return true}catch(e){console.warn('pushMany',key,e)}}
+    ids.forEach(id=>this.queue('upsert',key,id));return false},
   async flush(){
     if(this.busy||!this.client||!this.user||App.mode!=='cloud')return;
     if(!navigator.onLine){this.set('offline');return}
@@ -1791,7 +1807,7 @@ function pitchArt(){return `<svg class="pitch-art" viewBox="0 0 560 200" preserv
 UI.pf={q:'',kelas:'',status:'',sort:'name-asc',page:1};
 route('peserta',{label:'Data Peserta',icon:'users',render(){
   const f=UI.pf;
-  return pageHead('Data Peserta',`Anggota ${esc(eskulObj().name)}. Data pribadi siswa disimpan sekali dan dipakai bersama oleh semua eskul yang diikutinya.`,`<button class="btn" data-act="addMember"><i data-lucide="user-round-plus"></i>Ambil dari siswa terdaftar</button><button class="btn btn-primary" data-act="addStudent"><i data-lucide="user-plus"></i>Siswa Baru</button>`,eskCrumb())+
+  return pageHead('Data Peserta',`Anggota ${esc(eskulObj().name)}. Data pribadi siswa disimpan sekali dan dipakai bersama oleh semua eskul yang diikutinya.`,`<button class="btn" data-act="importStudents"><i data-lucide="file-spreadsheet"></i>Impor Excel</button><button class="btn" data-act="addMember"><i data-lucide="user-round-plus"></i>Ambil dari siswa terdaftar</button><button class="btn btn-primary" data-act="addStudent"><i data-lucide="user-plus"></i>Siswa Baru</button>`,eskCrumb())+
   `<div class="card"><div class="card-b row" style="gap:10px">
     <div class="search-in"><i data-lucide="search"></i><input class="input" id="pfQ" placeholder="Cari nama atau NIS/NISN" value="${esc(f.q)}"></div>
     <select class="select" id="pfKelas" style="width:auto"><option value="">Semua kelas</option>${LEVELS.map(l=>`<option ${f.kelas===l?'selected':''} value="${l}">Kelas ${l}</option>`).join('')}</select>
@@ -1843,8 +1859,8 @@ function studentForm(s){
     <div class="photo-up"><span id="phPrev">${avatar({...s,name:s.name||'?'},'lg')}</span><div><label class="btn btn-sm" for="phIn"><i data-lucide="image-plus"></i>Pilih foto</label><input type="file" id="phIn" accept="image/*" hidden> <button class="btn btn-sm btn-ghost" id="phDel" type="button">Hapus foto</button><div class="small muted" style="margin-top:4px">${Drive.enabled()&&App.mode==='cloud'?'Foto diunggah ke Google Drive sekolah.':'Foto diperkecil dan disimpan di data aplikasi.'}</div></div></div>
     <div class="form-grid">
       <div class="field full"><label for="fName">Nama lengkap *</label><input class="input" id="fName" value="${esc(s.name)}"></div>
-      <div class="field"><label for="fNisn">NIS/NISN *</label><input class="input" id="fNisn" inputmode="numeric" value="${esc(s.nisn)}"></div>
-      <div class="field"><label for="fKelas">Kelas *</label><select class="select" id="fKelas">${KELAS_OPTS.map(k=>`<option ${k===s.kelas?'selected':''}>${k}</option>`).join('')}</select></div>
+      <div class="field"><label for="fNisn">NIS/NISN</label><input class="input" id="fNisn" inputmode="numeric" value="${esc(s.nisn)}"></div>
+      <div class="field"><label for="fKelas">Kelas</label><select class="select" id="fKelas"><option value="" ${s.kelas?'':'selected'}>— Belum diisi —</option>${(s.kelas&&!KELAS_OPTS.includes(s.kelas)?[s.kelas]:[]).concat(KELAS_OPTS).map(k=>`<option ${k===s.kelas?'selected':''}>${esc(k)}</option>`).join('')}</select></div>
       <div class="field"><label for="fGender">Jenis kelamin</label><select class="select" id="fGender"><option value="L" ${s.gender==='L'?'selected':''}>Laki-laki</option><option value="P" ${s.gender==='P'?'selected':''}>Perempuan</option></select></div>
       <div class="field"><label for="fBirth">Tanggal lahir</label><input class="input" type="date" id="fBirth" value="${esc(s.birthDate)}"></div>
       <div class="field"><label for="fPhone">Nomor orang tua</label><input class="input" id="fPhone" inputmode="tel" value="${esc(s.parentPhone)}" placeholder="08xxxxxxxxxx"></div>
@@ -1861,8 +1877,8 @@ function studentForm(s){
   m.querySelector('#fSave').onclick=()=>{
     const g=id=>m.querySelector(id).value.trim();const err=m.querySelector('#fErr');
     const rec={id:s.id,name:g('#fName'),nisn:g('#fNisn'),kelas:g('#fKelas'),gender:g('#fGender'),birthDate:g('#fBirth'),parentPhone:g('#fPhone').replace(/\D/g,''),photo,photoConsent:m.querySelector('#fConsent').checked};
-    const errs=[];if(!rec.name)errs.push('Nama wajib diisi.');if(!rec.nisn)errs.push('NIS/NISN wajib diisi.');else if(!/^\d{4,10}$/.test(rec.nisn))errs.push('NIS/NISN hanya angka (4–10 digit).');
-    const dup=S.students.find(x=>x.nisn===rec.nisn&&x.id!==rec.id);if(dup)errs.push(`NIS/NISN sudah dipakai ${dup.name}. Gunakan “Ambil dari siswa terdaftar”.`);
+    const errs=[];if(!rec.name)errs.push('Nama wajib diisi.');if(rec.nisn&&!/^\d{4,10}$/.test(rec.nisn))errs.push('NIS/NISN hanya angka (4–10 digit).');
+    const dup=rec.nisn&&S.students.find(x=>x.nisn===rec.nisn&&x.id!==rec.id);if(dup)errs.push(`NIS/NISN sudah dipakai ${dup.name}. Gunakan “Ambil dari siswa terdaftar”.`);
     m.querySelector('#fName').classList.toggle('err',!rec.name);m.querySelector('#fNisn').classList.toggle('err',errs.some(e=>e.includes('NIS')));
     if(errs.length){err.textContent=errs.join(' ');err.hidden=false;return}
     if(isNew)rec.id=newId('STD');
@@ -1870,6 +1886,213 @@ function studentForm(s){
     if(curRoute()==='peserta')pesertaTable();else render();
     if(isNew)autoAccountFor(rec.id)};
 }
+
+/* ---------- Impor siswa dari Excel / CSV ----------
+   Kolom wajib: Nama + Jenis Kelamin. Kolom lain boleh kosong; foto ditambahkan belakangan lewat Edit.
+   Siswa yang sudah ada (NISN sama, atau nama + kelas sama) tidak digandakan: cukup ditambahkan ke eskul. */
+const IMP_COLS=[
+  ['name','Nama Lengkap *',30,/^(nama( lengkap| siswa| peserta| murid)?|name|nama lengkap siswa)$/],
+  ['gender','Jenis Kelamin (L/P) *',12,/^(jk|l\/p|lp|jenis kelamin|kelamin|gender|sex|jns kelamin)$/],
+  ['nisn','NISN',15,/^(nisn|nis|nis\/nisn|nisn\/nis|no induk|nomor induk|nipd)$/],
+  ['kelas','Kelas',10,/^(kelas|rombel|rombongan belajar|rombel saat ini|kls)$/],
+  ['birthDate','Tanggal Lahir',14,/^(tanggal lahir|tgl lahir|tgl\.? lahir|lahir|ttl|tempat,? tanggal lahir|tempat,? tgl\.? lahir)$/],
+  ['parentPhone','No. HP Orang Tua',18,/^(no\.? hp( orang tua| ortu| wali)?|hp( orang tua| ortu| wali)?|nomor (hp|orang tua|telepon)|telepon|telp|no\.? telp|whatsapp|wa|no\.? wa)$/],
+  ['eskul','Eskul',22,/^(eskul|ekskul|ekstrakurikuler|ekstra)$/],
+  ['photoConsent','Izin Foto (Ya/Tidak)',14,/^(izin foto|ijin foto|izin publikasi foto)$/],
+];
+const BULAN_ID={jan:1,januari:1,feb:2,februari:2,mar:3,maret:3,apr:4,april:4,mei:5,may:5,jun:6,juni:6,jul:7,juli:7,agu:8,agt:8,agus:8,agustus:8,aug:8,sep:9,sept:9,september:9,okt:10,oktober:10,oct:10,nov:11,november:11,nop:11,des:12,desember:12,dec:12};
+const ROMAN={1:'I',2:'II',3:'III',4:'IV',5:'V',6:'VI'};
+const impHdr=s=>String(s instanceof Date?'':s??'').toLowerCase().replace(/\*/g,'').replace(/\(.*?\)/g,'').replace(/\s+/g,' ').trim();
+function impCellText(v){
+  if(v===null||v===undefined)return '';
+  if(v instanceof Date)return v;
+  if(typeof v==='object'){if(v.richText)return v.richText.map(t=>t.text).join('');if('result' in v)return impCellText(v.result);if(v.text!==undefined)return impCellText(v.text);if(v.hyperlink)return String(v.text||'');return ''}
+  return v}
+function impGender(v){const s=String(v||'').toLowerCase().replace(/[^a-z]/g,'');
+  if(!s)return '';if(/^(l|lk|laki|lakilaki|pria|putra|male|m|cowok|lelaki)$/.test(s))return 'L';
+  if(/^(p|pr|perempuan|wanita|putri|female|f|w|cewek)$/.test(s))return 'P';return null}
+function impKelas(v){let s=String(v||'').toUpperCase().replace(/^KELAS\s*/,'').replace(/[-_.\/]/g,' ').replace(/\s+/g,' ').trim();if(!s)return '';
+  let m=s.match(/^(\d)\s*([A-Z]?)$/);if(m&&ROMAN[m[1]])s=ROMAN[m[1]]+(m[2]?' '+m[2]:'');
+  else{m=s.match(/^(VI|IV|V|III|II|I)\s*([A-Z]?)$/);if(m)s=m[1]+(m[2]?' '+m[2]:'')}
+  return s}
+function impDate(v){
+  const ok=(y,m,d)=>{y=+y;m=+m;d=+d;if(y<100)y+=y>50?1900:2000;const t=new Date(Date.UTC(y,m-1,d));return t.getUTCFullYear()===y&&t.getUTCMonth()===m-1&&t.getUTCDate()===d&&y>1990&&y<2030?`${y}-${pad(m)}-${pad(d)}`:null};
+  if(v===''||v===null||v===undefined)return '';
+  if(v instanceof Date)return isNaN(v)?null:ok(v.getUTCFullYear(),v.getUTCMonth()+1,v.getUTCDate());
+  if(typeof v==='number'&&v>20000&&v<60000){const t=new Date(Math.round((v-25569)*864e5));return ok(t.getUTCFullYear(),t.getUTCMonth()+1,t.getUTCDate())}
+  let s=String(v).trim();if(s.includes(','))s=s.split(',').pop().trim();   // "Jakarta, 12 Mei 2016"
+  let m;
+  if((m=s.match(/^(\d{4})[-\/.](\d{1,2})[-\/.](\d{1,2})/)))return ok(m[1],m[2],m[3]);
+  if((m=s.match(/^(\d{1,2})[-\/.\s](\d{1,2})[-\/.\s](\d{2,4})$/)))return ok(m[3],m[2],m[1]);
+  if((m=s.match(/^(\d{1,2})[\s-]+([a-zA-Z]+)\.?[\s-]+(\d{2,4})$/))){const mo=BULAN_ID[m[2].toLowerCase()];return mo?ok(m[3],mo,m[1]):null}
+  if((m=s.match(/^(\d{8})$/)))return ok(s.slice(4),s.slice(2,4),s.slice(0,2));  // 12052016
+  return null}
+function impNisn(v){let s=String(v??'').trim();if(!s)return '';if(/e\+/i.test(s))return null;s=s.replace(/\.0+$/,'').replace(/[\s.'-]/g,'');
+  if(!/^\d+$/.test(s))return null;if(s.length===8||s.length===9)s=s.padStart(10,'0');return s.length>=4&&s.length<=10?s:null}
+function impPhone(v){let s=String(v??'').replace(/\.0+$/,'').replace(/\D/g,'');if(!s)return '';if(s.startsWith('62'))s='0'+s.slice(2);else if(s.startsWith('8'))s='0'+s;return s.length>=9&&s.length<=14?s:null}
+function impYes(v){const s=String(v||'').toLowerCase().trim();return /^(ya|y|yes|iya|1|true|v|✓|ada|boleh|izin|diizinkan)$/.test(s)}
+const impKey=s=>String(s||'').toLowerCase().replace(/[^a-z0-9]/g,'');
+function impEskuls(v,fallback){const raw=String(v||'').trim();if(!raw)return {ids:[fallback],bad:[]};
+  const ids=[],bad=[];raw.split(/[,;\/+&]|\bdan\b/i).map(x=>x.trim()).filter(Boolean).forEach(x=>{const k=impKey(x);
+    const e=ESKULS.find(e=>impKey(e.name)===k||impKey(e.id)===k||impKey(e.name).includes(k)&&k.length>=4||k.includes(impKey(e.name))||(k==='sepakbola'||k==='bola'||k==='football')&&e.id==='football'||k==='silat'&&e.id==='silat'||k==='paskib'&&e.id==='paskibra'||k==='gambar'&&e.id==='menggambar');
+    if(e){if(!ids.includes(e.id))ids.push(e.id)}else bad.push(x)});
+  return {ids:ids.length?ids:[fallback],bad,fellBack:!ids.length}}
+
+/* Baca berkas → array baris (array nilai). */
+async function impReadFile(file){
+  const name=file.name.toLowerCase();
+  if(name.endsWith('.xls'))throw new Error('Format .xls (Excel lama) belum didukung. Di Excel pilih File → Save As → "Excel Workbook (.xlsx)".');
+  if(name.endsWith('.csv')||file.type==='text/csv'){const t=(await file.text()).replace(/^﻿/,'');return impParseCsv(t)}
+  const X=await excelLib(),wb=new X.Workbook();
+  try{await wb.xlsx.load(await file.arrayBuffer())}catch(e){throw new Error('Berkas tidak bisa dibaca sebagai .xlsx. Simpan ulang sebagai "Excel Workbook (.xlsx)".')}
+  // pilih lembar pertama yang punya kolom "Nama"
+  let best=null;
+  wb.eachSheet(ws=>{if(best)return;const rows=[];ws.eachRow({includeEmpty:true},(row,rn)=>{const vals=[];row.eachCell({includeEmpty:true},(c,cn)=>{vals[cn-1]=impCellText(c.value)});rows[rn-1]=vals});
+    for(let i=0;i<rows.length;i++)rows[i]=rows[i]||[];
+    if(rows.slice(0,15).some(r=>r.some(c=>IMP_COLS[0][3].test(impHdr(c)))))best=rows});
+  if(!best)throw new Error('Tidak ditemukan kolom "Nama" di berkas ini. Pakai template dari tombol "Unduh template".');
+  return best}
+function impParseCsv(t){const d=(t.split('\n')[0].match(/;/g)||[]).length>(t.split('\n')[0].match(/,/g)||[]).length?';':',';
+  const rows=[];let row=[],cur='',q=false;
+  for(let i=0;i<t.length;i++){const c=t[i];
+    if(q){if(c==='"'){if(t[i+1]==='"'){cur+='"';i++}else q=false}else cur+=c}
+    else if(c==='"')q=true;else if(c===d){row.push(cur);cur=''}else if(c==='\n'||c==='\r'){if(c==='\r'&&t[i+1]==='\n')i++;row.push(cur);rows.push(row);row=[];cur=''}else cur+=c}
+  if(cur||row.length){row.push(cur);rows.push(row)}return rows}
+
+/* Ubah baris mentah menjadi daftar siswa yang sudah dicek. */
+function impAnalyze(rows,target){
+  const hi=rows.findIndex(r=>(r||[]).some(c=>IMP_COLS[0][3].test(impHdr(c))));
+  const hdr=(rows[hi]||[]).map(impHdr),map={};
+  IMP_COLS.forEach(([k,,,re])=>{const i=hdr.findIndex(h=>re.test(h));if(i>=0)map[k]=i});
+  if(map.gender===undefined)throw new Error('Kolom "Jenis Kelamin" (atau "JK"/"L/P") tidak ditemukan. Kolom ini wajib.');
+  const allowed=allowedEskuls(),out=[],seen=new Map();
+  const byNisn=new Map(S.students.filter(s=>s.nisn).map(s=>[s.nisn,s]));
+  const nameKey=(n,k)=>impKey(n)+'|'+impKey(k);
+  const byName=new Map();S.students.forEach(s=>{const k=nameKey(s.name,s.kelas);byName.set(k,byName.has(k)?'dup':s);const k2=impKey(s.name);byName.set('*'+k2,byName.has('*'+k2)?'dup':s)});
+  for(let i=hi+1;i<rows.length;i++){const r=rows[i]||[];const g=k=>map[k]===undefined?'':r[map[k]];
+    const nameRaw=String(g('name')??'').replace(/\s+/g,' ').trim();
+    if(!nameRaw&&r.every(c=>c===''||c===null||c===undefined||String(c).trim()===''))continue;   // baris kosong
+    const it={row:i+1,errs:[],warns:[]};
+    // nama yang ditulis HURUF BESAR semua (umum dari Dapodik) atau huruf kecil semua dirapikan menjadi Huruf Kapital Di Awal Kata
+    it.name=(nameRaw===nameRaw.toUpperCase()||nameRaw===nameRaw.toLowerCase())&&/[a-z]/i.test(nameRaw)?nameRaw.toLowerCase().replace(/(^|[\s'-])\p{L}/gu,c=>c.toUpperCase()):nameRaw;
+    if(!it.name)it.errs.push('Nama kosong');
+    it.gender=impGender(g('gender'));if(it.gender===null){it.errs.push(`JK "${g('gender')}" tidak dikenal (pakai L/P)`)}else if(!it.gender)it.errs.push('JK kosong');
+    it.nisn=impNisn(g('nisn'));if(it.nisn===null){it.warns.push(`NISN "${g('nisn')}" tidak valid, dikosongkan`);it.nisn=''}
+    it.kelas=impKelas(g('kelas'));if(it.kelas&&!KELAS_OPTS.includes(it.kelas))it.warns.push(`Kelas "${it.kelas}" di luar daftar`);
+    it.birthDate=impDate(g('birthDate'));if(it.birthDate===null){it.warns.push(`Tgl lahir "${g('birthDate') instanceof Date?'':g('birthDate')}" tidak terbaca, dikosongkan`);it.birthDate=''}
+    it.parentPhone=impPhone(g('parentPhone'));if(it.parentPhone===null){it.warns.push('No. HP tidak valid, dikosongkan');it.parentPhone=''}
+    it.photoConsent=map.photoConsent!==undefined&&impYes(g('photoConsent'));
+    const es=impEskuls(map.eskul===undefined?'':g('eskul'),target);
+    it.eskuls=es.ids.filter(e=>allowed.includes(e));
+    es.bad.forEach(b=>it.warns.push(`Eskul "${b}" tidak dikenal${es.fellBack?`, dimasukkan ke ${eskulById(target).name}`:''}`));
+    es.ids.filter(e=>!allowed.includes(e)).forEach(e=>it.warns.push(`Tidak berwenang di ${eskulById(e).name}`));
+    if(!it.eskuls.length&&!it.errs.length)it.errs.push('Tidak ada eskul tujuan yang bisa dipakai');
+    // duplikat di dalam berkas
+    const fk=it.nisn?'n:'+it.nisn:'k:'+nameKey(it.name,it.kelas);
+    if(it.name&&seen.has(fk)){it.errs.push(`Ganda dengan baris ${seen.get(fk)}`)}else if(it.name)seen.set(fk,it.row);
+    // sudah ada di aplikasi?
+    let ex=it.nisn&&byNisn.get(it.nisn);
+    if(!ex&&it.name){const c=it.kelas?byName.get(nameKey(it.name,it.kelas)):byName.get('*'+impKey(it.name));if(c&&c!=='dup'&&(!c.nisn||!it.nisn))ex=c}
+    it.existing=ex||null;
+    if(ex&&it.nisn&&ex.nisn&&ex.nisn!==it.nisn)it.existing=null;
+    if(it.existing){const already=it.eskuls.filter(e=>S.memberships.some(m=>m.studentId=== it.existing.id&&m.eskulId===e&&!m.archived));
+      it.newEskuls=it.eskuls.filter(e=>!already.includes(e))}else it.newEskuls=it.eskuls.slice();
+    it.status=it.errs.length?'err':it.existing?(it.newEskuls.length?'join':'same'):'new';
+    out.push(it)}
+  return {items:out,map,header:hi+1}}
+
+/* Simpan hasil impor: lokal sekali, lalu dikirim ke Supabase per 200 baris. */
+async function impCommit(items,{fill}){
+  const stuIds=[],memIds=[],today=todayStr();let nNew=0,nJoin=0,nFill=0;
+  const put=(key,rec)=>{rec=pick(key,rec);const arr=COLS[key].get(S);const i=arr.findIndex(r=>r.id===rec.id);if(i>=0)arr[i]=rec;else arr.push(rec);return rec.id};
+  items.forEach(it=>{if(it.status==='err'||it.status==='same'&&!fill)return;
+    let sid;
+    if(it.existing){sid=it.existing.id;
+      if(fill&&(isSuper()||S.memberships.some(m=>m.studentId===sid&&allowedEskuls().includes(m.eskulId)))){const s=rawStu(sid),patch={};
+        ['nisn','kelas','gender','birthDate','parentPhone'].forEach(k=>{if(!s[k]&&it[k])patch[k]=it[k]});if(it.photoConsent&&!s.photoConsent)patch.photoConsent=true;
+        if(Object.keys(patch).length){stuIds.push(put('students',{...s,...patch}));nFill++}}}
+    else{sid=newId('STD');stuIds.push(put('students',{id:sid,name:it.name,nisn:it.nisn,kelas:it.kelas,gender:it.gender,birthDate:it.birthDate,parentPhone:it.parentPhone,photo:'',photoConsent:it.photoConsent}));nNew++}
+    (it.newEskuls||[]).forEach(e=>{const old=S.memberships.find(m=>m.studentId===sid&&m.eskulId===e);
+      memIds.push(put('memberships',old?{...old,archived:false,status:'Aktif'}:{id:`MBR-${e}-${sid}`,eskulId:e,studentId:sid,status:'Aktif',joinDate:today,archived:false,extra:{}}));
+      if(e==='football'){const p=S.football.squad.find(x=>x.studentId===sid);if(p&&p.status!=='Aktif'){put('squad',{...p,status:'Aktif'});Sync.queue('upsert','squad',p.id)}}});
+    if(it.existing&&it.newEskuls.length)nJoin++});
+  persist();
+  if(App.mode==='cloud'){const okS=await Sync.pushMany('students',stuIds);await Sync.pushMany('memberships',memIds,!okS)}
+  return {nNew,nJoin,nFill,nStu:stuIds.length,nMem:memIds.length}}
+
+ACT.importStudents=()=>{
+  if(!canWrite('students')||!canWrite('memberships'))return denied();
+  const opts=allowedEskuls();
+  const m=openModal({title:'Impor Siswa dari Excel',size:'lg',body:`
+    <div class="imp-steps"><div><b>1</b><span>Unduh template, isi minimal kolom <b>Nama</b> dan <b>Jenis Kelamin</b>. Kolom lain boleh kosong.</span></div><div><b>2</b><span>Pilih berkas (.xlsx atau .csv). Data dicek dulu sebelum disimpan.</span></div><div><b>3</b><span>Foto ditambahkan belakangan lewat tombol Edit di Data Peserta.</span></div></div>
+    <div class="row" style="gap:10px;flex-wrap:wrap"><button class="btn" id="impTpl" type="button"><i data-lucide="file-down"></i>Unduh template</button>
+      <label class="btn btn-primary" for="impFile"><i data-lucide="file-up"></i>Pilih berkas Excel</label><input type="file" id="impFile" accept=".xlsx,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv" hidden>
+      <span class="spacer"></span>
+      <label class="small" style="display:flex;gap:8px;align-items:center">Eskul tujuan <select class="select" id="impEsk" style="width:auto">${opts.map(e=>`<option value="${e}" ${e===E()?'selected':''}>${esc(eskulById(e).name)}</option>`).join('')}</select></label></div>
+    <p class="small muted" style="margin:0">Bila berkas punya kolom <b>Eskul</b> (mis. <i>Pramuka, Tari</i>), siswa dimasukkan ke eskul tersebut. Bila kosong, masuk ke eskul tujuan di atas.</p>
+    <div id="impOut"></div>`,
+    foot:`<button class="btn" data-act="closeModal">Tutup</button><button class="btn btn-primary" id="impGo" disabled><i data-lucide="upload"></i>Impor</button>`});
+  let res=null;
+  const show=()=>{const o=m.querySelector('#impOut'),go=m.querySelector('#impGo');if(!res){o.innerHTML='';go.disabled=true;return}
+    const it=res.items,c=k=>it.filter(x=>x.status===k).length,warn=it.filter(x=>x.status!=='err'&&x.warns.length).length,fillable=it.filter(x=>x.existing).length;
+    const B={new:'<span class="badge b-ok">Baru</span>',join:'<span class="badge b-info">Sudah ada · masuk eskul</span>',same:'<span class="badge b-idle">Sudah terdaftar</span>',err:'<span class="badge b-bad">Dilewati</span>'};
+    const n=c('new')+c('join');
+    o.innerHTML=`<div class="imp-sum"><span><b>${it.length}</b> baris dibaca</span><span class="ok"><b>${c('new')}</b> siswa baru</span><span class="info"><b>${c('join')}</b> sudah ada, ditambahkan ke eskul</span><span><b>${c('same')}</b> sudah terdaftar</span>${c('err')?`<span class="bad"><b>${c('err')}</b> dilewati</span>`:''}${warn?`<span class="warn"><b>${warn}</b> dengan catatan</span>`:''}</div>
+      ${fillable?`<label class="row small" style="gap:8px;cursor:pointer;margin:2px 0 8px;flex-wrap:nowrap;align-items:flex-start"><input type="checkbox" style="margin-top:2px;flex:none" id="impFill" ${UI.impFill!==false?'checked':''}> Lengkapi data siswa lama yang masih kosong (NISN, kelas, tgl lahir, HP) dari berkas ini. Data yang sudah terisi tidak ditimpa.</label>`:''}
+      <div class="tbl-wrap imp-tbl"><table class="tbl no-cards"><thead><tr><th class="c">Baris</th><th>Nama</th><th class="c">JK</th><th>NISN</th><th>Kelas</th><th>Tgl lahir</th><th>Eskul</th><th>Status</th></tr></thead><tbody>
+      ${it.map(x=>`<tr class="${x.status==='err'?'imp-err':''}"><td class="c muted num">${x.row}</td><td><b>${esc(x.name||'—')}</b>${x.errs.concat(x.warns).length?`<div class="small" style="color:var(${x.errs.length?'--bad':'--warn'})">${esc(x.errs.concat(x.warns).join(' · '))}</div>`:''}</td><td class="c">${esc(x.gender||'')}</td><td class="num">${esc(x.nisn)}</td><td>${esc(x.kelas)}</td><td class="num">${x.birthDate?fmtDate(x.birthDate,{short:true}):''}</td><td>${x.eskuls.map(eskChip).join(' ')}</td><td>${B[x.status]}</td></tr>`).join('')}
+      </tbody></table></div>`;
+    go.disabled=!n&&!(fillable&&UI.impFill!==false);go.innerHTML=`<i data-lucide="upload"></i>${n?`Impor ${n} siswa`:'Lengkapi data'}`;
+    const fl=o.querySelector('#impFill');if(fl)fl.onchange=()=>{UI.impFill=fl.checked;show()};icons()};
+  let rows=null;
+  const analyze=()=>{if(!rows)return;try{res=impAnalyze(rows,m.querySelector('#impEsk').value);if(!res.items.length)throw new Error('Tidak ada baris data di bawah judul kolom.')}catch(e){res=null;m.querySelector('#impOut').innerHTML=`<div class="note warn"><i data-lucide="triangle-alert"></i><div>${esc(e.message)}</div></div>`;m.querySelector('#impGo').disabled=true;icons();return}show()};
+  m.querySelector('#impEsk').onchange=analyze;
+  m.querySelector('#impTpl').onclick=e=>withExcel(e.currentTarget,X=>impTemplate(X));
+  m.querySelector('#impFile').onchange=async e=>{const f=e.target.files[0];e.target.value='';if(!f)return;
+    m.querySelector('#impOut').innerHTML=`<div class="empty"><i data-lucide="loader-circle" class="spin"></i><div>Membaca ${esc(f.name)}…</div></div>`;icons();
+    try{rows=await impReadFile(f);analyze()}catch(err){rows=null;res=null;m.querySelector('#impOut').innerHTML=`<div class="note warn"><i data-lucide="triangle-alert"></i><div>${esc(err.message)}</div></div>`;m.querySelector('#impGo').disabled=true;icons()}};
+  m.querySelector('#impGo').onclick=async()=>{if(!res)return;const go=m.querySelector('#impGo');go.disabled=true;go.innerHTML='<i data-lucide="loader-circle" class="spin"></i>Menyimpan…';icons();
+    try{const r=await impCommit(res.items,{fill:UI.impFill!==false});closeModal();
+      const parts=[r.nNew&&`${r.nNew} siswa baru`,r.nJoin&&`${r.nJoin} siswa lama masuk eskul`,r.nFill&&`${r.nFill} data dilengkapi`].filter(Boolean);
+      toast(parts.length?`Impor selesai: ${parts.join(', ')}.`:'Tidak ada perubahan.');
+      if(curRoute()==='peserta')pesertaTable();else render();
+      if(r.nNew&&isSuper()&&(S.meta.autoAccount||{}).on!==false)setTimeout(async()=>{if(await confirmBox({title:'Buat akun login siswa?',message:`${r.nNew} siswa baru belum punya akun login. Buat sekarang di menu <b>Akun Pengguna</b> (username NISN, kata sandi tanggal lahir)?`,okText:'Buka Akun Pengguna'}))go('akun')},400)}
+    catch(err){toast('Impor gagal: '+err.message,'err');go.disabled=false;go.innerHTML='<i data-lucide="upload"></i>Coba lagi';icons()}};
+};
+
+async function impTemplate(X){
+  const wb=new X.Workbook(),ws=wb.addWorksheet('Data Siswa',{views:[{state:'frozen',ySplit:1}]});
+  ws.columns=IMP_COLS.map(([k,h,w])=>({header:h,key:k,width:w}));
+  ws.getRow(1).height=30;
+  ws.getRow(1).eachCell((c,i)=>{c.font={bold:true,color:{argb:'FFFFFFFF'},size:10};c.fill=xlFill(i<=2?'FFC0392B':XL.head);c.alignment={horizontal:'center',vertical:'middle',wrapText:true};c.border=xlBorder('FF8FA3C2')});
+  const N=500;
+  ['nisn','parentPhone'].forEach(k=>{ws.getColumn(k).numFmt='@'});
+  ws.getColumn('birthDate').numFmt='dd/mm/yyyy';
+  for(let r=2;r<=N+1;r++){
+    ws.getCell(r,2).dataValidation={type:'list',allowBlank:true,formulae:['"L,P"'],showErrorMessage:true,errorTitle:'Jenis kelamin',error:'Isi L (laki-laki) atau P (perempuan).'};
+    ws.getCell(r,4).dataValidation={type:'list',allowBlank:true,formulae:[`"${KELAS_OPTS.join(',')}"`],showErrorMessage:false};
+    ws.getCell(r,8).dataValidation={type:'list',allowBlank:true,formulae:['"Ya,Tidak"']};
+    ['nisn','parentPhone'].forEach(k=>{ws.getCell(r,IMP_COLS.findIndex(c=>c[0]===k)+1).numFmt='@'});
+    ws.getCell(r,5).numFmt='dd/mm/yyyy';
+  }
+  const g=wb.addWorksheet('Petunjuk');g.getColumn(1).width=24;g.getColumn(2).width=78;
+  const rows=[['PETUNJUK IMPOR SISWA',''],['',''],
+    ['Nama Lengkap *','Wajib. Contoh: Reynand Aditya'],
+    ['Jenis Kelamin *','Wajib. L = laki-laki, P = perempuan (boleh juga "Laki-laki"/"Perempuan").'],
+    ['NISN','Boleh kosong. Dipakai sebagai username login siswa. Ketik sebagai teks agar angka 0 di depan tidak hilang.'],
+    ['Kelas','Boleh kosong. Contoh: IV A, 4A, 4 A, IV-A (otomatis dirapikan).'],
+    ['Tanggal Lahir','Boleh kosong. Contoh: 12/05/2016 atau 12 Mei 2016. Dipakai sebagai kata sandi awal siswa.'],
+    ['No. HP Orang Tua','Boleh kosong. Contoh: 081234567890.'],
+    ['Eskul','Boleh kosong (masuk ke eskul tujuan yang dipilih di aplikasi). Bisa lebih dari satu: Pramuka, Tari.'],
+    ['Izin Foto','Ya / Tidak. Boleh kosong (dianggap Tidak).'],
+    ['',''],
+    ['Pilihan eskul',ESKULS.map(e=>e.name).join(', ')],
+    ['Siswa yang sudah ada','Tidak digandakan. NISN sama, atau nama + kelas sama, dianggap siswa yang sama dan cukup ditambahkan ke eskul.'],
+    ['Foto','Tidak lewat Excel. Tambahkan belakangan: Data Peserta → tombol pensil (Edit) → Pilih foto.'],
+    ['Contoh baris','Reynand Aditya | L | 0165312327 | IV A | 12/05/2016 | 081234567890 | Sepak Bola, Pramuka | Ya']];
+  rows.forEach((r,i)=>{const row=g.addRow(r);row.getCell(1).font={bold:true};row.getCell(2).alignment={wrapText:true,vertical:'top'};row.getCell(1).alignment={vertical:'top'}});
+  g.getCell('A1').font={bold:true,size:13,color:{argb:XL.navy}};
+  await xlSave(wb,'Template Impor Siswa - Eskul Management.xlsx')}
 
 /* ---------- Absensi ---------- */
 UI.att={date:null,type:'Latihan Rutin',refId:''};UI.attDraft={};
